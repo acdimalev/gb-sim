@@ -1,0 +1,68 @@
+Concept
+-------
+
+I personally have, perhaps, months of experience writing 8080 / z80 / (...)
+assembly code.  Roughly the same amount of experience working with gameboy
+hardware.  And for the level of complexity that I'm aiming for in my own game
+development, I have low-precision math problems that need to be dealt with.
+For these purposes, my current workflow of compilation to emulators leaves
+a lot to be desired.  This simulator is intended to bridge from this development
+workflow to my existing C development workflow.  Essentially, I can write
+a short program that tests assembly code to be written, and receive real-time
+feedback on the behavior of the assembly code as I write it.
+
+Prior knowledge of testing invariants and symmetries is probably essential for
+making practical use of this simulator.
+
+
+Usage
+-----
+
+Copy `gb-sim.h` into a working directory.  All of the `sim-*.c` files are
+examples of usage.  I'll be adding more of these, and maybe commenting them as
+I talk with people.  This was all written by me, so I'm 100% sure that I have
+no idea what kind of comments would be helpful for these examples.
+
+
+Syntax
+------
+
+The assembly syntax is a subset of `rgbasm`, since that's what I'm using for
+development.  Only the parser cares about the syntax, but that accounts for
+about 50% of `gb-sim.h`.
+
+https://rgbds.gbdev.io/docs/v0.5.2/rgbasm.5 -- assembly syntax
+https://rgbds.gbdev.io/docs/v0.5.2/gbz80.7 -- cpu instructions
+
+
+Program Counter
+---------------
+
+At the moment, the program counter is a lie.  Given that the actual compiled
+programs are virtual and do not exist in actual address space in the simulation,
+this may or may not be important.  The byte-length of the instructions is also
+ignored, and thus practical limitations are not simulated for relative jumps.
+
+There are definitely options for addressing this if it becomes an issue, but
+it currently has no impact on my workflow, and I have no interest in engineering
+a solution to problems that I do not have.
+
+
+Jumps (Branches)
+----------------
+
+At the moment, only conditional relative jumps backwards to anonymous labels
+is supported.  This is obviously insufficient for practical use.  Most likely
+I will limit myself to implementing anonymous labels only.  However, relative
+jumps forward and unconditional jumps backward will need to be implemented.
+
+
+Performance
+-----------
+
+Source compilation takes roughly a fifth of a second on my development machine.
+This is about an order of magnitude slower than I intend.  Some optimization
+will be done.  No actual attempt has been made to optimize the performance
+of the simulation (parsing included), but that takes roughly a thousandth of
+a second.  No optimization will be performed outside of compilation time until
+a practical need arises.
