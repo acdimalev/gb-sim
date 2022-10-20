@@ -15,6 +15,13 @@ Prior knowledge of testing invariants and symmetries is probably essential for
 making practical use of this simulator.
 
 
+Examples
+--------
+
+It's a Sliding Puzzle (Ludum Dare 51 Compo)
+https://ldjam.com/events/ludum-dare/51/its-a-sliding-puzzle
+
+
 Usage
 -----
 
@@ -55,6 +62,15 @@ At the moment, only conditional relative jumps backwards to anonymous labels
 is supported.  This is obviously insufficient for practical use.  Most likely
 I will limit myself to implementing anonymous labels only.  However, relative
 jumps forward and unconditional jumps backward will need to be implemented.
+
+
+Comments & Expressions
+----------------------
+
+At the moment, comments are not supported and only extremely basic support for
+integer constants is present.  After putting this simulator to practical use in
+developing a game in 48 hours for Ludum Dare, I can say with confidence that
+robust support for these features is absolutely necessary and I plan to add them.
 
 
 Performance
