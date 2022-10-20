@@ -186,7 +186,7 @@ struct program
 };
 
 struct symbol
-{ char name[8];
+{ char name[16];
   int32_t value;
 };
 
@@ -1227,6 +1227,10 @@ struct
 , "[hld]", IHLD_TOK_TYPE, 0
 , "sp", SP_TOK_TYPE, 0
 , "af", AF_TOK_TYPE, 0
+, "b", R8_TOK_TYPE, R8_B
+, ":--", ANON_LABEL_TOK_TYPE, -2
+, "d", R8_TOK_TYPE, R8_D
+, "bc", R16_TOK_TYPE, R16_BC
 };
 size_t n_arg_tokens = listsize(arg_tokens);
 
@@ -2120,7 +2124,7 @@ struct program *parse_program_file
 ( struct symbol *symbols, size_t n_symbols
 , char *filename
 )
-{ char code[256];
+{ char code[1 << 16];
   int f = open(filename, O_RDONLY);
   if (!f) panic;
   size_t n = read(f, code, sizeof(code));
