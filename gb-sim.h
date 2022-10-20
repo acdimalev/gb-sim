@@ -1251,11 +1251,74 @@ size_t nextdelim(char *delim, char *string)
 }
 
 
+uint32_t parse_base10(char *string, size_t n)
+{ uint32_t x = 0;
+  for (int i = 0; i < n; i++)
+    x = string[i] - '0' + x * 10;
+  return x;
+}
+
+
+uint32_t parse_base2(char *string, size_t n)
+{ uint32_t x = 0;
+  for (int i = 0; i < n; i++)
+    x = (string[i] - '0') | (x << 1);
+  return x;
+}
+
+
+uint32_t parse_base16(char *string, size_t n)
+{ uint32_t x = 0;
+  for (int i = 0; i < n; i++)
+    x = (string[i] > '9' ? 10 + string[i] - 'a' : string[i] - '0') | (x << 4);
+  return x;
+}
+
+
+struct arg_token arg_token_from_value(int32_t value)
+{ if (0 <= value && 8 > value)
+    return (struct arg_token){ U3_TOK_TYPE, value };
+  if (-128 <= value && 128 > value)
+    return (struct arg_token){ E8_TOK_TYPE, value };
+  if (-128 <= value && 256 > value)
+    return (struct arg_token){ N8_TOK_TYPE, value };
+  if (-32768 <= value && 65536 > value)
+    return (struct arg_token){ N16_TOK_TYPE, value };
+  panic;
+}
+
+
 struct arg_token parse_arg
 ( struct symbol *symbols, size_t n_symbols
 , char *string, size_t n
 )
 { int i;
+
+  if (!n) panic;
+
+  for (i = 0; n > i; i++)
+    if ('0' > string[i] || '9' < string[i]) break;
+  if (n == i)
+    return arg_token_from_value(parse_base10(string, n));
+
+  if ('%' == *string)
+  { for (i = 1; n > i; i++)
+      if ('0' > string[i] || '1' < string[i]) break;
+    if (n == i)
+      return arg_token_from_value(parse_base2(1+string, n-1));
+  }
+
+  if ('$' == *string)
+  { for (i = 1; n > i; i++)
+      if
+      (  '0' > string[i]
+      || '9' < string[i] && 'a' > string[i]
+      || 'f' < string[i]
+      ) break;
+    if (n == i)
+      return arg_token_from_value(parse_base16(1+string, n-1));
+  }
+
   for (i = 0; n_arg_tokens > i; i++)
     if (n == strlen(arg_tokens[i].string) && !strncmp(arg_tokens[i].string, string, n)) break;
   if (n_arg_tokens != i)
@@ -1264,16 +1327,8 @@ struct arg_token parse_arg
   for (i = 0; n_symbols > i; i++)
     if (n == strlen(symbols[i].name) && !strncmp(symbols[i].name, string, n)) break;
   if (n_symbols != i)
-  { uint16_t value = symbols[i].value;
-    if (0 <= value && 8 > value)
-      return (struct arg_token){ U3_TOK_TYPE, value };
-    if (-128 <= value && 128 > value)
-      return (struct arg_token){ E8_TOK_TYPE, value };
-    if (-128 <= value && 256 > value)
-      return (struct arg_token){ N8_TOK_TYPE, value };
-    if (-32768 <= value && 65536 > value)
-      return (struct arg_token){ N16_TOK_TYPE, value };
-  }
+    return arg_token_from_value(symbols[i].value);
+
   panic;
 }
 
