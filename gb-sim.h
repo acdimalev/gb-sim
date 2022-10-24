@@ -1393,48 +1393,127 @@ printf("%.*s\n", n, line);
     void append(enum op op, uint16_t p1, uint16_t p2)
     { program->instructions[program->length++] =
         (struct instruction){ op, p1, p2 };
-      if (max_instructions == program->length) panic;
     }
 
+    if (max_instructions == program->length) panic;
+
     // pattern match
-    switch (isn_token)
-    { case ADC_TOK:
-      switch (first_arg_token.type)
+
+    void pattern_1(enum op op_a_r8, enum op op_a_ihl, enum op op_a_n8)
+    { switch (first_arg_token.type)
       { case R8_TOK_TYPE:
         switch (second_arg_token.type)
         { case NONE_TOK_TYPE:
-            append(OP_ADC_A_R8, first_arg_token.value, 0);
+            append(op_a_r8, first_arg_token.value, 0);
             break;
           case R8_TOK_TYPE:
             if (R8_A != first_arg_token.value) panic;
-            append(OP_ADC_A_R8, second_arg_token.value, 0);
+            append(op_a_r8, second_arg_token.value, 0);
             break;
           case IHL_TOK_TYPE:
             if (R8_A != first_arg_token.value) panic;
-            append(OP_ADC_A_IHL, 0, 0);
+            append(op_a_ihl, 0, 0);
             break;
           case U3_TOK_TYPE:
           case E8_TOK_TYPE:
           case N8_TOK_TYPE:
             if (R8_A != first_arg_token.value) panic;
-            append(OP_ADC_A_N8, second_arg_token.value, 0);
+            append(op_a_n8, second_arg_token.value, 0);
             break;
           default:
             panic;
         } break;
         case IHL_TOK_TYPE:
           if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_ADC_A_IHL, 0, 0);
+          append(op_a_ihl, 0, 0);
           break;
         case U3_TOK_TYPE:
         case E8_TOK_TYPE:
         case N8_TOK_TYPE:
           if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_ADC_A_N8, first_arg_token.value, 0);
+          append(op_a_n8, first_arg_token.value, 0);
           break;
         default:
           panic;
-      } break;
+      }
+    }
+
+    void pattern_2(enum op op_r8, enum op op_ihl, enum op op_r16, enum op op_sp)
+    { switch (first_arg_token.type)
+      { case R8_TOK_TYPE:
+          if (NONE_TOK_TYPE != second_arg_token.type) panic;
+          append(op_r8, first_arg_token.value, 0);
+          break;
+        case IHL_TOK_TYPE:
+          if (NONE_TOK_TYPE != second_arg_token.type) panic;
+          append(op_ihl, 0, 0);
+          break;
+        case R16_TOK_TYPE:
+          if (NONE_TOK_TYPE != second_arg_token.type) panic;
+          append(op_r16, first_arg_token.value, 0);
+          break;
+        case SP_TOK_TYPE:
+          if (NONE_TOK_TYPE != second_arg_token.type) panic;
+          append(op_sp, 0, 0);
+          break;
+        default:
+          panic;
+      }
+    }
+
+    void pattern_3(enum op op_u3_r8, enum op op_u3_ihl)
+    { if (U3_TOK_TYPE != first_arg_token.type) panic;
+      switch (second_arg_token.type)
+      { case R8_TOK_TYPE:
+          append(OP_BIT_U3_R8, first_arg_token.value, second_arg_token.value);
+          break;
+        case IHL_TOK_TYPE:
+          append(OP_BIT_U3_IHL, first_arg_token.value, 0);
+          break;
+        default:
+          panic;
+      }
+    }
+
+    void pattern_4(enum op op_r8, enum op op_ihl)
+    { if (NONE_TOK_TYPE != second_arg_token.type) panic;
+      switch (first_arg_token.type)
+      { case R8_TOK_TYPE:
+          append(op_r8, first_arg_token.value, 0);
+          break;
+        case IHL_TOK_TYPE:
+          append(op_ihl, 0, 0);
+          break;
+        default:
+          panic;
+      }
+    }
+
+    void pattern_5(enum op op)
+    { if (NONE_TOK_TYPE != first_arg_token.type) panic;
+      if (NONE_TOK_TYPE != second_arg_token.type) panic;
+      append(op, 0, 0);
+    }
+
+    void pattern_6(enum op op_af, enum op op_r16)
+    { switch (first_arg_token.type)
+      { case AF_TOK_TYPE:
+          if (NONE_TOK_TYPE != second_arg_token.type) panic;
+          append(OP_POP_AF, 0, 0);
+          panic;
+        case R16_TOK_TYPE:
+          if (NONE_TOK_TYPE != second_arg_token.type) panic;
+          append(OP_POP_R16, first_arg_token.value, 0);
+          panic;
+        default:
+          panic;
+      }
+    }
+
+    switch (isn_token)
+    { case ADC_TOK:
+        pattern_1(OP_ADC_A_R8, OP_ADC_A_IHL, OP_ADC_A_N8);
+        break;
       case ADD_TOK:
       switch (first_arg_token.type)
       { case R8_TOK_TYPE:
@@ -1495,307 +1574,38 @@ printf("%.*s\n", n, line);
           panic;
       } break;
       case AND_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(OP_AND_A_R8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_AND_A_R8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_AND_A_IHL, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_AND_A_N8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_AND_A_IHL, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_AND_A_N8, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
-      } break;
+        pattern_1(OP_AND_A_R8, OP_AND_A_IHL, OP_AND_A_N8);
+        break;
       case CP_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(OP_CP_A_R8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_CP_A_R8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_CP_A_IHL, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_CP_A_N8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_CP_A_IHL, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_CP_A_N8, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
-      } break;
+        pattern_1(OP_CP_A_R8, OP_CP_A_IHL, OP_CP_A_N8);
+        break;
       case DEC_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_DEC_R8, first_arg_token.value, 0);
-          break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_DEC_IHL, 0, 0);
-          break;
-        case R16_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_DEC_R16, first_arg_token.value, 0);
-          break;
-        case SP_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_DEC_SP, 0, 0);
-          break;
-        default:
-          panic;
-      } break;
+        pattern_2(OP_DEC_R8, OP_DEC_IHL, OP_DEC_R16, OP_DEC_SP);
+        break;
       case INC_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_INC_R8, first_arg_token.value, 0);
-          break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_INC_IHL, 0, 0);
-          break;
-        case R16_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_INC_R16, first_arg_token.value, 0);
-          break;
-        case SP_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_INC_SP, 0, 0);
-        default:
-          panic;
-      } break;
+        pattern_2(OP_INC_R8, OP_INC_IHL, OP_INC_R16, OP_INC_SP);
+        break;
       case OR_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(OP_OR_A_R8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_OR_A_R8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_OR_A_IHL, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_OR_A_N8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_OR_A_IHL, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_OR_A_N8, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
-      } break;
+        pattern_1(OP_OR_A_R8, OP_OR_A_IHL, OP_OR_A_N8);
+        break;
       case SBC_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(OP_SBC_A_R8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_SBC_A_R8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_SBC_A_IHL, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_SBC_A_N8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_SBC_A_IHL, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_SBC_A_N8, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
-      } break;
+        pattern_1(OP_SBC_A_R8, OP_SBC_A_IHL, OP_SBC_A_N8);
+        break;
       case SUB_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(OP_SUB_A_R8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_SUB_A_R8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_SUB_A_IHL, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_SUB_A_N8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_SUB_A_IHL, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_SUB_A_N8, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
-      } break;
+        pattern_1(OP_SUB_A_R8, OP_SUB_A_IHL, OP_SUB_A_N8);
+        break;
       case XOR_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(OP_XOR_A_R8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_XOR_A_R8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_XOR_A_IHL, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_XOR_A_N8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_XOR_A_IHL, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_XOR_A_N8, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
-      } break;
+        pattern_1(OP_XOR_A_R8, OP_XOR_A_IHL, OP_XOR_A_N8);
+        break;
 
       case BIT_TOK:
-        if (U3_TOK_TYPE != first_arg_token.type) panic;
-        switch (second_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_BIT_U3_R8, first_arg_token.value, second_arg_token.value);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_BIT_U3_IHL, first_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_3(OP_BIT_U3_R8, OP_BIT_U3_IHL);
         break;
       case RES_TOK:
-        if (U3_TOK_TYPE != first_arg_token.type) panic;
-        switch (second_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_RES_U3_R8, first_arg_token.value, second_arg_token.value);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_RES_U3_IHL, first_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_3(OP_RES_U3_R8, OP_RES_U3_IHL);
         break;
       case SET_TOK:
-        if (U3_TOK_TYPE != first_arg_token.type) panic;
-        switch (second_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_SET_U3_R8, first_arg_token.value, second_arg_token.value);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_SET_U3_IHL, first_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_3(OP_SET_U3_R8, OP_SET_U3_IHL);
         break;
       case SWAP_TOK:
         if (NONE_TOK_TYPE != second_arg_token.type) panic;
@@ -1812,115 +1622,37 @@ printf("%.*s\n", n, line);
         break;
 
       case RL_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_RL_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_RL_IHL, 0, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_4(OP_RL_R8, OP_RL_IHL);
         break;
       case RLA_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic;
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        append(OP_RLA, 0, 0);
+        pattern_5(OP_RLA);
         break;
       case RLC_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_RLC_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_RLC_IHL, 0, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_4(OP_RLC_R8, OP_RLC_IHL);
         break;
       case RLCA_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic;
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        append(OP_RLCA, 0, 0);
+        pattern_5(OP_RLCA);
         break;
       case RR_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_RR_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_RR_IHL, 0, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_4(OP_RR_R8, OP_RR_IHL);
         break;
       case RRA_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic;
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        append(OP_RRA, 0, 0);
+        pattern_5(OP_RRA);
         break;
       case RRC_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_RRC_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_RRC_IHL, 0, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_4(OP_RRC_R8, OP_RRC_IHL);
         break;
       case RRCA_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic;
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        append(OP_RRCA, 0, 0);
+        pattern_5(OP_RRCA);
         break;
       case SLA_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_SLA_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_SLA_IHL, 0, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_4(OP_SLA_R8, OP_SLA_IHL);
         break;
       case SRA_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_SRA_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_SRA_IHL, 0, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_4(OP_SRA_R8, OP_SRA_IHL);
         break;
       case SRL_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_SRL_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_SRL_IHL, 0, 0);
-            break;
-          default:
-            panic;
-        }
+        pattern_4(OP_SRL_R8, OP_SRL_IHL);
         break;
 
       case LD_TOK:
@@ -2095,76 +1827,38 @@ printf("%.*s\n", n, line);
         panic;
 
       case POP_TOK:
-      switch (first_arg_token.type)
-      { case AF_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_POP_AF, 0, 0);
-          panic;
-        case R16_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_POP_R16, first_arg_token.value, 0);
-          panic;
-        default:
-          panic;
-      } break;
+        pattern_6(OP_POP_AF, OP_POP_R16);
+        break;
       case PUSH_TOK:
-      switch (first_arg_token.type)
-      { case AF_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_PUSH_AF, 0, 0);
-          panic;
-        case R16_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_PUSH_R16, first_arg_token.value, 0);
-          panic;
-        default:
-          panic;
-      } break;
+        pattern_6(OP_PUSH_AF, OP_PUSH_R16);
+        break;
 
       case CCF_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_CCF, 0, 0);
+        pattern_5(OP_CCF);
         break;
       case CPL_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_CPL, 0, 0);
+        pattern_5(OP_CPL);
         break;
       case DAA_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_DAA, 0, 0);
+        pattern_5(OP_DAA);
         break;
       case DI_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_DI, 0, 0);
+        pattern_5(OP_DI);
         break;
       case EI_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_EI, 0, 0);
+        pattern_5(OP_EI);
         break;
       case HALT_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_HALT, 0, 0);
+        pattern_5(OP_HALT);
         break;
       case NOP_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_NOP, 0, 0);
+        pattern_5(OP_NOP);
         break;
       case SCF_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_SCF, 0, 0);
+        pattern_5(OP_SCF);
         break;
       case STOP_TOK:
-        if (NONE_TOK_TYPE != first_arg_token.type) panic; 
-        if (NONE_TOK_TYPE != second_arg_token.type) panic; 
-        append(OP_STOP, 0, 0);
+        pattern_5(OP_STOP);
         break;
       default: panic;
     }
