@@ -1127,6 +1127,8 @@ enum isn_token
 , NOP_TOK
 , SCF_TOK
 , STOP_TOK
+
+, N_ISN_TOKEN
 };
 
 struct
@@ -1188,29 +1190,32 @@ size_t n_isn_tokens = listsize(isn_tokens);
 
 enum arg_token_type
 { NONE_TOK_TYPE
+, N_TOK_TYPE
 , R16_TOK_TYPE
-, N16_TOK_TYPE
 , R8_TOK_TYPE
-, N8_TOK_TYPE
 , IR16_TOK_TYPE
 , IHLI_TOK_TYPE
 , CC_TOK_TYPE
 , ANON_LABEL_TOK_TYPE
 , IHL_TOK_TYPE
-, U3_TOK_TYPE
 , IN16_TOK_TYPE
 , IC_TOK_TYPE
 , IHLD_TOK_TYPE
-, E8_TOK_TYPE
 , SP_TOK_TYPE
 , SPE8_TOK_TYPE
 , AF_TOK_TYPE
+, VEC_TOK_TYPE
+, N_ARG_TOKEN_TYPE
+};
+
+struct arg_token
+{ enum arg_token_type type;
+  int32_t value;
 };
 
 struct
 { char string[8];
-  enum arg_token_type type;
-  int32_t value;
+  struct arg_token token;
 } arg_tokens[] =
 { "", NONE_TOK_TYPE, 0
 , "a", R8_TOK_TYPE, R8_A
@@ -1236,102 +1241,505 @@ struct
 };
 size_t n_arg_tokens = listsize(arg_tokens);
 
-struct arg_token
-{ enum arg_token_type type;
-  int32_t value;
-};
+
+bool streq(char *s0, int n, char *s)
+{ return n == strlen(s0) && !strncmp(s0, s, n); }
 
 
-size_t nextdelim(char *delim, char *string)
-{ int i = 0;
+int next_newline(char *text)
+{ for (int n = 0; 0 != text[n]; n++)
+  if ('\n' == text[n])
+    return n;
+  return -1;
+}
+
+
+void trim_leading_space(int *n, char **s)
+{ while (*n && ' ' == **s) (*s)++, (*n)--; }
+
+
+void trim_trailing_space(int *n, char **s)
+{ while (*n && ' ' == (*s)[*n-1]) (*n)--; }
+
+
+int char_in_range(char c, int n, char *s)
+{ for (int i = 0; i < n; i++)
+  if (c == s[i])
+    return i;
+  return -1;
+}
+
+
+uint32_t parse_base10(int n, char *s)
+{ uint32_t x = 0;
+  for (int i = 0; i < n; i++)
+    x = s[i] - '0' + x * 10;
+  return x;
+}
+
+
+uint32_t parse_base2(int n, char *s)
+{ uint32_t x = 0;
+  for (int i = 0; i < n; i++)
+    x = (s[i] - '0') | (x << 1);
+  return x;
+}
+
+
+uint32_t parse_base16(int n, char *s)
+{ uint32_t x = 0;
+  for (int i = 0; i < n; i++)
+    x = (s[i] > '9' ? 10 + s[i] - 'a' : s[i] - '0') | (x << 4);
+  return x;
+}
+
+
+char *parse_error_s0;
+
+
+void parse_error(char *error, int n, char *s)
+{ int l0 = 1;
+  char *s1 = parse_error_s0;
+
   while (true)
-  { if (0 == string[i]) return i;
-    for (char *c = delim; *c; c++)
-      if (*c == string[i]) return i;
-    i++;
+  { int n1 = next_newline(s1);
+    if (s <= n1 + s1) break;
+    s1 += 1+n1; l0++;
   }
+
+  int n1 = next_newline(s1);
+
+  char markings[n1];
+  for (int i = 0; i < n1; i++)
+    markings[i] = ( s <= i + s1 && n + s > i + s1 ) ? '~' : ' ';
+
+  printf("%s at line %d\n\n%.*s\n%.*s\n", error, l0, n1, s1, n1, markings);
+  exit(1);
 }
 
 
-uint32_t parse_base10(char *string, size_t n)
-{ uint32_t x = 0;
-  for (int i = 0; i < n; i++)
-    x = string[i] - '0' + x * 10;
-  return x;
+enum isn_token parse_isn_token(int n, char *s)
+{ for (int i = 0; i < n_isn_tokens; i++)
+  if (streq(isn_tokens[i].string, n, s))
+    return i;
+
+  parse_error("invalid instruction", n, s);
 }
 
 
-uint32_t parse_base2(char *string, size_t n)
-{ uint32_t x = 0;
-  for (int i = 0; i < n; i++)
-    x = (string[i] - '0') | (x << 1);
-  return x;
-}
-
-
-uint32_t parse_base16(char *string, size_t n)
-{ uint32_t x = 0;
-  for (int i = 0; i < n; i++)
-    x = (string[i] > '9' ? 10 + string[i] - 'a' : string[i] - '0') | (x << 4);
-  return x;
-}
-
-
-struct arg_token arg_token_from_value(int32_t value)
-{ if (0 <= value && 8 > value)
-    return (struct arg_token){ U3_TOK_TYPE, value };
-  if (-128 <= value && 128 > value)
-    return (struct arg_token){ E8_TOK_TYPE, value };
-  if (-128 <= value && 256 > value)
-    return (struct arg_token){ N8_TOK_TYPE, value };
-  if (-32768 <= value && 65536 > value)
-    return (struct arg_token){ N16_TOK_TYPE, value };
-  panic;
-}
-
-
-struct arg_token parse_arg
-( struct symbol *symbols, size_t n_symbols
-, char *string, size_t n
+struct arg_token parse_arg_token
+( int n_symbols, struct symbol *symbols
+, int n, char *s
 )
 { int i;
 
   if (!n) panic;
 
   for (i = 0; n > i; i++)
-    if ('0' > string[i] || '9' < string[i]) break;
+    if ('0' > s[i] || '9' < s[i]) break;
   if (n == i)
-    return arg_token_from_value(parse_base10(string, n));
+    return (struct arg_token){ N_TOK_TYPE, parse_base10(n, s) };
 
-  if ('%' == *string)
+  if ('%' == *s)
   { for (i = 1; n > i; i++)
-      if ('0' > string[i] || '1' < string[i]) break;
+      if ('0' > s[i] || '1' < s[i]) break;
     if (n == i)
-      return arg_token_from_value(parse_base2(1+string, n-1));
+      return (struct arg_token){ N_TOK_TYPE, parse_base2(n-1, 1+s) };
   }
 
-  if ('$' == *string)
+  if ('$' == *s)
   { for (i = 1; n > i; i++)
       if
-      (  '0' > string[i]
-      || '9' < string[i] && 'a' > string[i]
-      || 'f' < string[i]
+      (  '0' > s[i]
+      || '9' < s[i] && 'a' > s[i]
+      || 'f' < s[i]
       ) break;
     if (n == i)
-      return arg_token_from_value(parse_base16(1+string, n-1));
+      return (struct arg_token){ N_TOK_TYPE, parse_base16(n-1, 1+s) };
   }
 
-  for (i = 0; n_arg_tokens > i; i++)
-    if (n == strlen(arg_tokens[i].string) && !strncmp(arg_tokens[i].string, string, n)) break;
-  if (n_arg_tokens != i)
-    return (struct arg_token){ arg_tokens[i].type, arg_tokens[i].value };
+  for (int i = 0; i < n_arg_tokens; i++)
+  if (streq(arg_tokens[i].string, n, s))
+    return arg_tokens[i].token;
 
-  for (i = 0; n_symbols > i; i++)
-    if (n == strlen(symbols[i].name) && !strncmp(symbols[i].name, string, n)) break;
-  if (n_symbols != i)
-    return arg_token_from_value(symbols[i].value);
+  for (int i = 0; i < n_symbols; i++)
+  if (streq(symbols[i].name, n, s))
+    return (struct arg_token){ N_TOK_TYPE, symbols[i].value };
 
-  panic;
+  parse_error("invalid argument", n, s);
+}
+
+
+enum args
+{ ARGS_INVALID
+, ARGS_R8
+, ARGS_IHL
+, ARGS_N8
+, ARGS_A_R8
+, ARGS_A_IHL
+, ARGS_A_N8
+, ARGS_HL_R16
+, ARGS_R16
+, ARGS_U3_R8
+, ARGS_U3_IHL
+, ARGS_NONE
+, ARGS_R8_R8
+, ARGS_R8_N8
+, ARGS_R16_N16
+, ARGS_IHL_R8
+, ARGS_IHL_N8
+, ARGS_R8_IHL
+, ARGS_IR16_A
+, ARGS_IN16_A
+, ARGS_IC_A
+, ARGS_A_IR16
+, ARGS_A_IN16
+, ARGS_A_IC
+, ARGS_IHLI_A
+, ARGS_IHLD_A
+, ARGS_A_IHLI
+, ARGS_A_IHLD
+, ARGS_N16
+, ARGS_CC_N16
+, ARGS_HL
+, ARGS_E8
+, ARGS_CC_E8
+, ARGS_CC
+, ARGS_VEC
+, ARGS_HL_SP
+, ARGS_SP_E8
+, ARGS_SP
+, ARGS_SP_N16
+, ARGS_IN16_SP
+, ARGS_HL_SPE8
+, ARGS_SP_HL
+, ARGS_AF
+};
+
+
+static const struct instruction_signature {
+  enum op op;
+  enum args args;
+} instruction_signatures[N_ISN_TOKEN][N_ARG_TOKEN_TYPE][N_ARG_TOKEN_TYPE] =
+  { [ADC_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_ADC_A_R8,   ARGS_R8     }
+  , [ADC_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_ADC_A_IHL,  ARGS_IHL    }
+  , [ADC_TOK][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_ADC_A_N8,   ARGS_N8     }
+  , [ADC_TOK][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_ADC_A_R8,   ARGS_A_R8   }
+  , [ADC_TOK][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_ADC_A_IHL,  ARGS_A_IHL  }
+  , [ADC_TOK][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_ADC_A_N8,   ARGS_A_N8   }
+
+  , [ADD_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_ADD_A_R8,   ARGS_R8     }
+  , [ADD_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_ADD_A_IHL,  ARGS_IHL    }
+  , [ADD_TOK][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_ADD_A_N8,   ARGS_N8     }
+  , [ADD_TOK][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_ADD_A_R8,   ARGS_A_R8   }
+  , [ADD_TOK][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_ADD_A_IHL,  ARGS_A_IHL  }
+  , [ADD_TOK][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_ADD_A_N8,   ARGS_A_N8   }
+
+  , [AND_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_AND_A_R8,   ARGS_R8     }
+  , [AND_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_AND_A_IHL,  ARGS_IHL    }
+  , [AND_TOK][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_AND_A_N8,   ARGS_N8     }
+  , [AND_TOK][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_AND_A_R8,   ARGS_A_R8   }
+  , [AND_TOK][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_AND_A_IHL,  ARGS_A_IHL  }
+  , [AND_TOK][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_AND_A_N8,   ARGS_A_N8   }
+
+  , [CP_TOK ][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_CP_A_R8,    ARGS_R8     }
+  , [CP_TOK ][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_CP_A_IHL,   ARGS_IHL    }
+  , [CP_TOK ][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_CP_A_N8,    ARGS_N8     }
+  , [CP_TOK ][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_CP_A_R8,    ARGS_A_R8   }
+  , [CP_TOK ][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_CP_A_IHL,   ARGS_A_IHL  }
+  , [CP_TOK ][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_CP_A_N8,    ARGS_A_N8   }
+
+  , [DEC_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_DEC_R8,     ARGS_R8     }
+  , [DEC_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_DEC_IHL,    ARGS_IHL    }
+
+  , [INC_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_INC_R8,     ARGS_R8     }
+  , [INC_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_INC_IHL,    ARGS_IHL    }
+
+  , [OR_TOK ][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_OR_A_R8,    ARGS_R8     }
+  , [OR_TOK ][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_OR_A_IHL,   ARGS_IHL    }
+  , [OR_TOK ][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_OR_A_N8,    ARGS_N8     }
+  , [OR_TOK ][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_OR_A_R8,    ARGS_A_R8   }
+  , [OR_TOK ][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_OR_A_IHL,   ARGS_A_IHL  }
+  , [OR_TOK ][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_OR_A_N8,    ARGS_A_N8   }
+
+  , [SBC_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_SBC_A_R8,   ARGS_R8     }
+  , [SBC_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_SBC_A_IHL,  ARGS_IHL    }
+  , [SBC_TOK][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_SBC_A_N8,   ARGS_N8     }
+  , [SBC_TOK][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_SBC_A_R8,   ARGS_A_R8   }
+  , [SBC_TOK][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_SBC_A_IHL,  ARGS_A_IHL  }
+  , [SBC_TOK][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_SBC_A_N8,   ARGS_A_N8   }
+
+  , [SUB_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_SUB_A_R8,   ARGS_R8     }
+  , [SUB_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_SUB_A_IHL,  ARGS_IHL    }
+  , [SUB_TOK][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_SUB_A_N8,   ARGS_N8     }
+  , [SUB_TOK][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_SUB_A_R8,   ARGS_A_R8   }
+  , [SUB_TOK][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_SUB_A_IHL,  ARGS_A_IHL  }
+  , [SUB_TOK][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_SUB_A_N8,   ARGS_A_N8   }
+
+  , [XOR_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_XOR_A_R8,   ARGS_R8     }
+  , [XOR_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_XOR_A_IHL,  ARGS_IHL    }
+  , [XOR_TOK][N_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_XOR_A_N8,   ARGS_N8     }
+  , [XOR_TOK][R8_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_XOR_A_R8,   ARGS_A_R8   }
+  , [XOR_TOK][R8_TOK_TYPE ][IHL_TOK_TYPE ] = { OP_XOR_A_IHL,  ARGS_A_IHL  }
+  , [XOR_TOK][R8_TOK_TYPE ][N_TOK_TYPE   ] = { OP_XOR_A_N8,   ARGS_A_N8   }
+
+  , [ADD_TOK][R16_TOK_TYPE][R16_TOK_TYPE ] = { OP_ADD_HL_R16, ARGS_HL_R16 }
+  , [DEC_TOK][R16_TOK_TYPE][NONE_TOK_TYPE] = { OP_DEC_R16,    ARGS_R16    }
+  , [INC_TOK][R16_TOK_TYPE][NONE_TOK_TYPE] = { OP_INC_R16,    ARGS_R16    }
+
+  , [BIT_TOK ][N_TOK_TYPE  ][R8_TOK_TYPE  ] = { OP_BIT_U3_R8,  ARGS_U3_R8  }
+  , [BIT_TOK ][N_TOK_TYPE  ][IHL_TOK_TYPE ] = { OP_BIT_U3_IHL, ARGS_U3_IHL }
+  , [RES_TOK ][N_TOK_TYPE  ][R8_TOK_TYPE  ] = { OP_RES_U3_R8,  ARGS_U3_R8  }
+  , [RES_TOK ][N_TOK_TYPE  ][IHL_TOK_TYPE ] = { OP_RES_U3_IHL, ARGS_U3_IHL }
+  , [SET_TOK ][N_TOK_TYPE  ][R8_TOK_TYPE  ] = { OP_SET_U3_R8,  ARGS_U3_R8  }
+  , [SET_TOK ][N_TOK_TYPE  ][IHL_TOK_TYPE ] = { OP_SET_U3_IHL, ARGS_U3_IHL }
+  , [SWAP_TOK][R8_TOK_TYPE ][NONE_TOK_TYPE] = { OP_SWAP_R8,    ARGS_R8     }
+  , [SWAP_TOK][IHL_TOK_TYPE][NONE_TOK_TYPE] = { OP_SWAP_IHL,   ARGS_IHL    }
+
+  , [RL_TOK  ][R8_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_RL_R8,   ARGS_R8   }
+  , [RL_TOK  ][IHL_TOK_TYPE ][NONE_TOK_TYPE] = { OP_RL_IHL,  ARGS_IHL  }
+  , [RLA_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_RLA,     ARGS_NONE }
+  , [RLC_TOK ][R8_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_RLC_R8,  ARGS_R8   }
+  , [RLC_TOK ][IHL_TOK_TYPE ][NONE_TOK_TYPE] = { OP_RLC_IHL, ARGS_IHL  }
+  , [RLCA_TOK][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_RLCA,    ARGS_NONE }
+  , [RR_TOK  ][R8_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_RR_R8,   ARGS_R8   }
+  , [RR_TOK  ][IHL_TOK_TYPE ][NONE_TOK_TYPE] = { OP_RR_IHL,  ARGS_IHL  }
+  , [RRA_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_RRA,     ARGS_NONE }
+  , [RRC_TOK ][R8_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_RRC_R8,  ARGS_R8   }
+  , [RRC_TOK ][IHL_TOK_TYPE ][NONE_TOK_TYPE] = { OP_RRC_IHL, ARGS_IHL  }
+  , [RRCA_TOK][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_RRCA,    ARGS_NONE }
+  , [SLA_TOK ][R8_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_SLA_R8,  ARGS_R8   }
+  , [SLA_TOK ][IHL_TOK_TYPE ][NONE_TOK_TYPE] = { OP_SLA_IHL, ARGS_IHL  }
+  , [SRA_TOK ][R8_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_SRA_R8,  ARGS_R8   }
+  , [SRA_TOK ][IHL_TOK_TYPE ][NONE_TOK_TYPE] = { OP_SRA_IHL, ARGS_IHL  }
+  , [SRL_TOK ][R8_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_SRL_R8,  ARGS_R8   }
+  , [SRL_TOK ][IHL_TOK_TYPE ][NONE_TOK_TYPE] = { OP_SRL_IHL, ARGS_IHL  }
+
+  , [LD_TOK ][R8_TOK_TYPE  ][R8_TOK_TYPE  ] = { OP_LD_R8_R8,   ARGS_R8_R8   }
+  , [LD_TOK ][R8_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_LD_R8_N8,   ARGS_R8_N8   }
+  , [LD_TOK ][R16_TOK_TYPE ][N_TOK_TYPE   ] = { OP_LD_R16_N16, ARGS_R16_N16 }
+  , [LD_TOK ][IHL_TOK_TYPE ][R8_TOK_TYPE  ] = { OP_LD_IHL_R8,  ARGS_IHL_R8  }
+  , [LD_TOK ][IHL_TOK_TYPE ][N_TOK_TYPE   ] = { OP_LD_IHL_N8,  ARGS_IHL_N8  }
+  , [LD_TOK ][R8_TOK_TYPE  ][IHL_TOK_TYPE ] = { OP_LD_R8_IHL,  ARGS_R8_IHL  }
+  , [LD_TOK ][IR16_TOK_TYPE][R8_TOK_TYPE  ] = { OP_LD_IR16_A,  ARGS_IR16_A  }
+  , [LD_TOK ][IN16_TOK_TYPE][R8_TOK_TYPE  ] = { OP_LD_IN16_A,  ARGS_IN16_A  }
+  , [LDH_TOK][N_TOK_TYPE   ][R8_TOK_TYPE  ] = { OP_LDH_IN16_A, ARGS_IN16_A  }
+  , [LDH_TOK][IC_TOK_TYPE  ][R8_TOK_TYPE  ] = { OP_LDH_IC_A,   ARGS_IC_A    }
+  , [LD_TOK ][R8_TOK_TYPE  ][IR16_TOK_TYPE] = { OP_LD_A_IR16,  ARGS_A_IR16  }
+  , [LD_TOK ][R8_TOK_TYPE  ][IN16_TOK_TYPE] = { OP_LD_A_IN16,  ARGS_A_IN16  }
+  , [LDH_TOK][R8_TOK_TYPE  ][IN16_TOK_TYPE] = { OP_LDH_A_IN16, ARGS_A_IN16  }
+  , [LDH_TOK][R8_TOK_TYPE  ][IC_TOK_TYPE  ] = { OP_LDH_A_IC,   ARGS_A_IC    }
+  , [LD_TOK ][IHLI_TOK_TYPE][R8_TOK_TYPE  ] = { OP_LD_IHLI_A,  ARGS_IHLI_A  }
+  , [LD_TOK ][IHLD_TOK_TYPE][R8_TOK_TYPE  ] = { OP_LD_IHLD_A,  ARGS_IHLD_A  }
+  , [LD_TOK ][R8_TOK_TYPE  ][IHLI_TOK_TYPE] = { OP_LD_A_IHLI,  ARGS_A_IHLI  }
+  , [LD_TOK ][R8_TOK_TYPE  ][IHLD_TOK_TYPE] = { OP_LD_A_IHLD,  ARGS_A_IHLD  }
+
+  , [CALL_TOK][N_TOK_TYPE   ][NONE_TOK_TYPE] = { OP_CALL_N16,    ARGS_N16     }
+  , [CALL_TOK][CC_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_CALL_CC_N16, ARGS_CC_N16  }
+  , [JP_TOK  ][R16_TOK_TYPE ][NONE_TOK_TYPE] = { OP_JP_HL,       ARGS_HL      }
+  , [JP_TOK  ][N_TOK_TYPE   ][NONE_TOK_TYPE] = { OP_JP_N16,      ARGS_N16     }
+  , [JP_TOK  ][CC_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_JP_CC_N16,   ARGS_CC_N16  }
+  , [JR_TOK  ][N_TOK_TYPE   ][NONE_TOK_TYPE] = { OP_JR_E8,       ARGS_E8      }
+  , [JR_TOK  ][CC_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_JR_CC_E8,    ARGS_CC_E8   }
+  , [JR_TOK][CC_TOK_TYPE][ANON_LABEL_TOK_TYPE] = { OP_JR_CC_E8, ARGS_CC_E8 }
+  , [RET_TOK ][CC_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_RET_CC,      ARGS_CC      }
+  , [RET_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_RET,         ARGS_NONE    }
+  , [RETI_TOK][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_RETI,        ARGS_NONE    }
+  , [RST_TOK ][VEC_TOK_TYPE ][NONE_TOK_TYPE] = { OP_RST_VEC,     ARGS_VEC     }
+
+  , [ADD_TOK ][R16_TOK_TYPE ][SP_TOK_TYPE  ] = { OP_ADD_HL_SP,  ARGS_HL_SP   }
+  , [ADD_TOK ][SP_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_ADD_SP_E8,  ARGS_SP_E8   }
+  , [DEC_TOK ][SP_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_DEC_SP,     ARGS_SP      }
+  , [INC_TOK ][SP_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_INC_SP,     ARGS_SP      }
+  , [LD_TOK  ][SP_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_LD_SP_N16,  ARGS_SP_N16  }
+  , [LD_TOK  ][IN16_TOK_TYPE][SP_TOK_TYPE  ] = { OP_LD_IN16_SP, ARGS_IN16_SP }
+  , [LD_TOK  ][R16_TOK_TYPE ][SPE8_TOK_TYPE] = { OP_LD_HL_SPE8, ARGS_HL_SPE8 }
+  , [LD_TOK  ][SP_TOK_TYPE  ][R16_TOK_TYPE ] = { OP_LD_SP_HL,   ARGS_SP_HL   }
+  , [POP_TOK ][AF_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_POP_AF,     ARGS_AF      }
+  , [POP_TOK ][R16_TOK_TYPE ][NONE_TOK_TYPE] = { OP_POP_R16,    ARGS_R16     }
+  , [PUSH_TOK][AF_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_PUSH_AF,    ARGS_AF      }
+  , [PUSH_TOK][R16_TOK_TYPE ][NONE_TOK_TYPE] = { OP_PUSH_R16,   ARGS_R16     }
+
+  , [CCF_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_CCF,        ARGS_NONE    }
+  , [CPL_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_CPL,        ARGS_NONE    }
+  , [DAA_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_DAA,        ARGS_NONE    }
+  , [DI_TOK  ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_DI,         ARGS_NONE    }
+  , [EI_TOK  ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_EI,         ARGS_NONE    }
+  , [HALT_TOK][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_HALT,       ARGS_NONE    }
+  , [NOP_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_NOP,        ARGS_NONE    }
+  , [SCF_TOK ][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_SCF,        ARGS_NONE    }
+  , [STOP_TOK][NONE_TOK_TYPE][NONE_TOK_TYPE] = { OP_STOP,       ARGS_NONE    }
+  };
+
+
+static inline struct instruction parse_instruction
+( enum isn_token isn_token, struct arg_token arg_tokens[2]
+, int instruction_n, char *instruction_s
+, int arg_tokens_n[2], char *arg_tokens_s[2]
+)
+{ inline void n8_arg(int x)
+  { if (arg_tokens[x].value < -128 || arg_tokens[x].value > 255)
+      parse_error
+      ( "argument must be 8-bit"
+      , arg_tokens_n[x], arg_tokens_s[x]
+      );
+  }
+  inline void a_arg(int x)
+  { if (arg_tokens[x].value != R8_A)
+      parse_error
+      ( "argument must be register A"
+      , arg_tokens_n[x], arg_tokens_s[x]
+      );
+  }
+  inline void hl_arg(int x)
+  { if (arg_tokens[x].value != R16_HL)
+      parse_error
+      ( "argument must be register HL"
+      , arg_tokens_n[x], arg_tokens_s[x]
+      );
+  }
+  inline void u3_arg(int x)
+  { if (arg_tokens[x].value < 0 || arg_tokens[x].value > 7)
+      parse_error
+      ( "argument must be 3-bit unsigned"
+      , arg_tokens_n[x], arg_tokens_s[x]
+      );
+  }
+  inline void n16_arg(int x)
+  { if (arg_tokens[x].value < -32768 || arg_tokens[x].value > 65535)
+      parse_error
+      ( "argument must be 16-bit"
+      , arg_tokens_n[1], arg_tokens_s[1]
+      );
+  }
+  inline void e8_arg(int x)
+  { if (arg_tokens[x].value < -128 || arg_tokens[x].value > 127)
+      parse_error
+      ( "argument must be 8-bit offset"
+      , arg_tokens_n[x], arg_tokens_s[x]
+      );
+  }
+
+  const struct instruction_signature *signature =
+    &instruction_signatures[isn_token][arg_tokens[0].type][arg_tokens[1].type];
+  enum op op = signature->op;
+  enum args args = signature->args;
+
+  switch (args)
+  { case ARGS_R8:
+    case ARGS_R16:
+    case ARGS_R8_IHL:
+    case ARGS_CC:
+    case ARGS_VEC:
+    case ARGS_IN16_SP:
+      return (struct instruction){ op, arg_tokens[0].value, 0 };
+    case ARGS_IHL:
+    case ARGS_NONE:
+    case ARGS_SP:
+    case ARGS_AF:
+      return (struct instruction){ op, 0, 0 };
+    case ARGS_N8:
+    { n8_arg(0);
+      return (struct instruction){ op, arg_tokens[0].value, 0 };
+    }
+    case ARGS_A_R8:
+    case ARGS_A_IR16:
+    case ARGS_A_IN16:
+    { a_arg(0);
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    }
+    case ARGS_A_IHL:
+    case ARGS_A_IC:
+    case ARGS_A_IHLI:
+    case ARGS_A_IHLD:
+    { a_arg(0);
+      return (struct instruction){ op, 0, 0 };
+    }
+    case ARGS_A_N8:
+    { a_arg(0); n8_arg(1);
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    }
+    case ARGS_HL_R16:
+    { hl_arg(0);
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    }
+    case ARGS_U3_R8:
+    { u3_arg(0);
+      return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
+    }
+    case ARGS_U3_IHL:
+    { u3_arg(0);
+      return (struct instruction){ op, arg_tokens[0].value, 0 };
+    }
+    case ARGS_R8_R8:
+      return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
+    case ARGS_R8_N8:
+    { n8_arg(1);
+      return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
+    }
+    case ARGS_R16_N16:
+    case ARGS_CC_N16:
+    { n16_arg(1);
+      return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
+    }
+    case ARGS_IHL_R8:
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    case ARGS_IHL_N8:
+    { n8_arg(1);
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    }
+    case ARGS_IR16_A:
+    case ARGS_IN16_A:
+    { a_arg(1);
+      return (struct instruction){ op, arg_tokens[0].value, 0 };
+    }
+    case ARGS_IC_A:
+    case ARGS_IHLI_A:
+    case ARGS_IHLD_A:
+    { a_arg(1);
+      return (struct instruction){ op, 0, 0 };
+    }
+    case ARGS_N16:
+    { n16_arg(0);
+      return (struct instruction){ op, arg_tokens[0].value, 0 };
+    }
+    case ARGS_HL:
+    case ARGS_HL_SP:
+    { hl_arg(0);
+      return (struct instruction){ op, 0, 0 };
+    }
+    case ARGS_E8:
+    { e8_arg(0);
+      return (struct instruction){ op, arg_tokens[0].value, 0 };
+    }
+    case ARGS_CC_E8:
+    { e8_arg(1);
+      return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
+    }
+    case ARGS_SP_E8:
+    { e8_arg(1);
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    }
+    case ARGS_SP_N16:
+    { n16_arg(1);
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    }
+    case ARGS_HL_SPE8:
+    { hl_arg(0); e8_arg(1);
+      return (struct instruction){ op, arg_tokens[1].value, 0 };
+    }
+    case ARGS_SP_HL:
+    { hl_arg(1);
+      return (struct instruction){ op, 0, 0 };
+    }
+    case ARGS_INVALID:
+      parse_error
+      ( "invalid arguments for instruction"
+      , instruction_n, instruction_s
+      );
+    default:
+      panic;
+  }
 }
 
 
@@ -1339,532 +1747,128 @@ struct program *parse_program
 ( struct symbol *symbols, size_t n_symbols
 , char *text
 )
-{ int max_instructions = 256;
+{ int max_instructions = 255;
   struct program *program =
     malloc(sizeof(struct program) + max_instructions * sizeof(struct instruction));
   program->length = 0;
   int max_anonymous_labels = max_instructions;
-  int anonymous_labels[max_anonymous_labels];
-  size_t n_anonymous_labels = 0;
 
-  char *line = text;
+  int labels[max_anonymous_labels];
+  int n_labels = 0;
+  struct label_reference {
+    int isn, arg;
+    int n;
+    char *s;
+  } label_references[max_instructions];
+  int n_label_references = 0;
 
-  while (0 != *line)
-  { int i = 0, n;
-    if (':' == line[i])
-    { anonymous_labels[n_anonymous_labels++] = program->length;
-      if (max_anonymous_labels == n_anonymous_labels) panic;
-      i++;
-    }
-    n = nextdelim("\n", line);
-printf("%.*s\n", n, line);
-    // skip whitespace
-    while (' ' == line[i]) i++;
-    // match instruction
-    n = nextdelim(" \n", &line[i]);
-    enum isn_token isn_token;
-    { int j = 0;
-      for (; n_isn_tokens > j; j++)
-        if (n == strlen(isn_tokens[j].string) && !strncmp(isn_tokens[j].string, &line[i], n)) break;
-      if (n_isn_tokens == j) panic;
-      isn_token = isn_tokens[j].value;
-    }
-    i += n+1;
-    struct arg_token first_arg_token;
-    if (' ' == line[i-1])
-    { // parse first parameter
-      n = nextdelim(",\n", &line[i]);
-      first_arg_token = parse_arg(symbols, n_symbols, &line[i], n);
-      i += n+1;
-    }
-    else
-    { first_arg_token = (struct arg_token){ NONE_TOK_TYPE, 0 };
-    }
-    struct arg_token second_arg_token;
-    if (',' == line[i-1])
-    { while (' ' == line[i]) i++;
-      // parse second parameter
-      n = nextdelim("\n", &line[i]);
-      second_arg_token = parse_arg(symbols, n_symbols, &line[i], n);
-      i += n+1;
-    }
-    else
-    { second_arg_token = (struct arg_token){ NONE_TOK_TYPE, 0 };
-    }
+  parse_error_s0 = text;
 
-    void append(enum op op, uint16_t p1, uint16_t p2)
-    { program->instructions[program->length++] =
-        (struct instruction){ op, p1, p2 };
-    }
+  { // parse lines
 
-    if (max_instructions == program->length) panic;
+    int l = 1;
+    char *s = text;
+    int n = next_newline(text);
+    while (-1 != n)
+    { char *s1 = s;
+      int n1 = n;
 
-    // pattern match
-
-    void pattern_1(enum op op_a_r8, enum op op_a_ihl, enum op op_a_n8)
-    { switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(op_a_r8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(op_a_r8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(op_a_ihl, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(op_a_n8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(op_a_ihl, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(op_a_n8, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
+      { // trim comment
+        int n2 = char_in_range(';', n1, s1);
+        n1 = -1 != n2 ? n2 : n1;
       }
-    }
 
-    void pattern_2(enum op op_r8, enum op op_ihl, enum op op_r16, enum op op_sp)
-    { switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(op_r8, first_arg_token.value, 0);
-          break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(op_ihl, 0, 0);
-          break;
-        case R16_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(op_r16, first_arg_token.value, 0);
-          break;
-        case SP_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(op_sp, 0, 0);
-          break;
-        default:
-          panic;
+      trim_trailing_space(&n1, &s1);
+      trim_leading_space(&n1, &s1);
+
+      // parse label
+      if (':' == *s1)
+      { if (max_anonymous_labels == n_labels) panic;
+        labels[n_labels++] = program->length;
+        s1++; n1--;
+        trim_leading_space(&n1, &s1);
       }
-    }
 
-    void pattern_3(enum op op_u3_r8, enum op op_u3_ihl)
-    { if (U3_TOK_TYPE != first_arg_token.type) panic;
-      switch (second_arg_token.type)
-      { case R8_TOK_TYPE:
-          append(OP_BIT_U3_R8, first_arg_token.value, second_arg_token.value);
-          break;
-        case IHL_TOK_TYPE:
-          append(OP_BIT_U3_IHL, first_arg_token.value, 0);
-          break;
-        default:
-          panic;
-      }
-    }
+      if (n1)
+      { // parse instruction
 
-    void pattern_4(enum op op_r8, enum op op_ihl)
-    { if (NONE_TOK_TYPE != second_arg_token.type) panic;
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-          append(op_r8, first_arg_token.value, 0);
-          break;
-        case IHL_TOK_TYPE:
-          append(op_ihl, 0, 0);
-          break;
-        default:
-          panic;
-      }
-    }
+        enum isn_token isn_token;
+        struct arg_token arg_tokens[2] = { { 0, 0 }, { 0, 0 } };
+        int n_arg_tokens = 0;
 
-    void pattern_5(enum op op)
-    { if (NONE_TOK_TYPE != first_arg_token.type) panic;
-      if (NONE_TOK_TYPE != second_arg_token.type) panic;
-      append(op, 0, 0);
-    }
+        int instruction_n = n1;
+        char *instruction_s = s1;
+        int arg_tokens_n[2];
+        char *arg_tokens_s[2];
 
-    void pattern_6(enum op op_af, enum op op_r16)
-    { switch (first_arg_token.type)
-      { case AF_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_POP_AF, 0, 0);
-          panic;
-        case R16_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_POP_R16, first_arg_token.value, 0);
-          panic;
-        default:
-          panic;
-      }
-    }
+        int n2 = char_in_range(' ', n1, s1);
+        isn_token = parse_isn_token(-1 != n2 ? n2 : n1, s1);
 
-    switch (isn_token)
-    { case ADC_TOK:
-        pattern_1(OP_ADC_A_R8, OP_ADC_A_IHL, OP_ADC_A_N8);
-        break;
-      case ADD_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case NONE_TOK_TYPE:
-            append(OP_ADD_A_R8, first_arg_token.value, 0);
-            break;
-          case R8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_ADD_A_R8, second_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_ADD_A_IHL, 0, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_ADD_A_N8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_ADD_A_IHL, 0, 0);
-          break;
-        case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-        case N8_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          append(OP_ADD_A_N8, first_arg_token.value, 0);
-          break;
-        case R16_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case R16_TOK_TYPE:
-            if (R16_HL != first_arg_token.value) panic;
-            append(OP_ADD_HL_R16, second_arg_token.value, 0);
-            break;
-          case SP_TOK_TYPE:
-            if (R16_HL != first_arg_token.value) panic;
-            append(OP_ADD_HL_SP, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case SP_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-            append(OP_ADD_SP_E8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        default:
-          panic;
-      } break;
-      case AND_TOK:
-        pattern_1(OP_AND_A_R8, OP_AND_A_IHL, OP_AND_A_N8);
-        break;
-      case CP_TOK:
-        pattern_1(OP_CP_A_R8, OP_CP_A_IHL, OP_CP_A_N8);
-        break;
-      case DEC_TOK:
-        pattern_2(OP_DEC_R8, OP_DEC_IHL, OP_DEC_R16, OP_DEC_SP);
-        break;
-      case INC_TOK:
-        pattern_2(OP_INC_R8, OP_INC_IHL, OP_INC_R16, OP_INC_SP);
-        break;
-      case OR_TOK:
-        pattern_1(OP_OR_A_R8, OP_OR_A_IHL, OP_OR_A_N8);
-        break;
-      case SBC_TOK:
-        pattern_1(OP_SBC_A_R8, OP_SBC_A_IHL, OP_SBC_A_N8);
-        break;
-      case SUB_TOK:
-        pattern_1(OP_SUB_A_R8, OP_SUB_A_IHL, OP_SUB_A_N8);
-        break;
-      case XOR_TOK:
-        pattern_1(OP_XOR_A_R8, OP_XOR_A_IHL, OP_XOR_A_N8);
-        break;
+        while (-1 != n2)
+        { // parse argument
 
-      case BIT_TOK:
-        pattern_3(OP_BIT_U3_R8, OP_BIT_U3_IHL);
-        break;
-      case RES_TOK:
-        pattern_3(OP_RES_U3_R8, OP_RES_U3_IHL);
-        break;
-      case SET_TOK:
-        pattern_3(OP_SET_U3_R8, OP_SET_U3_IHL);
-        break;
-      case SWAP_TOK:
-        if (NONE_TOK_TYPE != second_arg_token.type) panic;
-        switch (first_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_SWAP_R8, first_arg_token.value, 0);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_SWAP_IHL, 0, 0);
-            break;
-          default:
-            panic;
+          s1 += 1 + n2;
+          n1 -= 1 + n2;
+          trim_leading_space(&n1, &s1);
+
+          if (2 == n_arg_tokens)
+            parse_error("too many argumnets", n1, s1);
+
+          n2 = char_in_range(',', n1, s1);
+
+          int n3 = -1 != n2 ? n2 : n1;
+          while (' ' == s1[n3-1]) n3--;
+
+          arg_tokens[n_arg_tokens++] = parse_arg_token(n_symbols, symbols, n3, s1);
         }
-        break;
 
-      case RL_TOK:
-        pattern_4(OP_RL_R8, OP_RL_IHL);
-        break;
-      case RLA_TOK:
-        pattern_5(OP_RLA);
-        break;
-      case RLC_TOK:
-        pattern_4(OP_RLC_R8, OP_RLC_IHL);
-        break;
-      case RLCA_TOK:
-        pattern_5(OP_RLCA);
-        break;
-      case RR_TOK:
-        pattern_4(OP_RR_R8, OP_RR_IHL);
-        break;
-      case RRA_TOK:
-        pattern_5(OP_RRA);
-        break;
-      case RRC_TOK:
-        pattern_4(OP_RRC_R8, OP_RRC_IHL);
-        break;
-      case RRCA_TOK:
-        pattern_5(OP_RRCA);
-        break;
-      case SLA_TOK:
-        pattern_4(OP_SLA_R8, OP_SLA_IHL);
-        break;
-      case SRA_TOK:
-        pattern_4(OP_SRA_R8, OP_SRA_IHL);
-        break;
-      case SRL_TOK:
-        pattern_4(OP_SRL_R8, OP_SRL_IHL);
-        break;
+        if (max_instructions == program->length) panic;
+        program->instructions[program->length++] = parse_instruction
+        ( isn_token, arg_tokens
+        , instruction_n, instruction_s
+        , arg_tokens_n, arg_tokens_s
+        );
 
-      case LD_TOK:
-      switch (first_arg_token.type)
-      { case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_LD_R8_R8, first_arg_token.value, second_arg_token.value);
+        switch (program->instructions[program->length-1].op)
+        { case OP_JR_CC_E8:
+            if (max_instructions == n_label_references) panic;
+            label_references[n_label_references++] = (struct label_reference)
+              { .isn = program->length-1
+              , .arg = 1
+              , .n = instruction_n
+              , .s = instruction_s
+              };
             break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            append(OP_LD_R8_N8, first_arg_token.value, second_arg_token.value);
-            break;
-          case IHL_TOK_TYPE:
-            append(OP_LD_R8_IHL, first_arg_token.value, second_arg_token.value);
-            break;
-          case IR16_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_LD_A_IR16, second_arg_token.value, 0);
-            break;
-          case IN16_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_LD_A_IN16, second_arg_token.value, 0);
-            break;
-          case IHLI_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_LD_A_IHLI, 0, 0);
-            break;
-          case IHLD_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_LD_A_IHLD, 0, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case R16_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-          case N16_TOK_TYPE:
-            append(OP_LD_R16_N16, first_arg_token.value, second_arg_token.value);
-            break;
-          case SPE8_TOK_TYPE:
-            if (R16_HL != first_arg_token.value) panic;
-            append(OP_LD_HL_SPE8, second_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHL_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case R8_TOK_TYPE:
-            append(OP_LD_IHL_R8, second_arg_token.value, 0);
-            break;
-          case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-            append(OP_LD_IHL_N8, second_arg_token.value, 0);
-            break;
-        } break;
-        case IR16_TOK_TYPE:
-          if (R8_TOK_TYPE != second_arg_token.type) panic;
-          if (R8_A != second_arg_token.value) panic;
-          append(OP_LD_IR16_A, first_arg_token.value, 0);
-          break;
-        case IN16_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case R8_TOK_TYPE:
-            if (R8_A != second_arg_token.value) panic;
-            append(OP_LD_IN16_A, first_arg_token.value, 0);
-            break;
-          case SP_TOK_TYPE:
-            append(OP_LD_IN16_SP, first_arg_token.value, 0);
-            break;
-          default:
-            panic;
-        } break;
-        case IHLI_TOK_TYPE:
-          if (R8_TOK_TYPE != second_arg_token.type) panic;
-          if (R8_A != second_arg_token.value) panic;
-          append(OP_LD_IHLI_A, 0, 0);
-          break;
-        case IHLD_TOK_TYPE:
-          if (R8_TOK_TYPE != second_arg_token.type) panic;
-          if (R8_A != second_arg_token.value) panic;
-          append(OP_LD_IHLD_A, 0, 0);
-          break;
-        case SP_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-          case N8_TOK_TYPE:
-          case N16_TOK_TYPE:
-            append(OP_LD_SP_N16, second_arg_token.value, 0);
-            break;
-          case R16_TOK_TYPE:
-            if (R16_HL != second_arg_token.value) panic;
-            append(OP_LD_SP_HL, 0, 0);
-            break;
-          default:
-            panic;
-        } break;
-        default:
-          panic;
-      } break;
-      case LDH_TOK:
-      switch (first_arg_token.type)
-      { case IN16_TOK_TYPE:
-          if (R8_TOK_TYPE != second_arg_token.type) panic;
-          if (R8_A != second_arg_token.value) panic;
-          append(OP_LDH_IN16_A, first_arg_token.value, 0);
-          break;
-        case IC_TOK_TYPE:
-          if (R8_TOK_TYPE != second_arg_token.type) panic;
-          if (R8_A != second_arg_token.value) panic;
-          append(OP_LDH_IC_A, 0, 0);
-          break;
-        case R8_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case IN16_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_LDH_A_IN16, second_arg_token.value, 0);
-            break;
-          case IC_TOK_TYPE:
-            if (R8_A != first_arg_token.value) panic;
-            append(OP_LDH_A_IC, 0, 0);
-            break;
-          default:
-            panic;
-        } break;
-        default:
-          panic;
-      } break;
+        }
+      }
 
-      case CALL_TOK:
-        panic;
-      case JP_TOK:
-        panic;
-      case JR_TOK:
-      switch (first_arg_token.type)
-      { case U3_TOK_TYPE:
-        case E8_TOK_TYPE:
-          panic;
-        case ANON_LABEL_TOK_TYPE:
-          if (NONE_TOK_TYPE != second_arg_token.type) panic;
-          panic;
-        case CC_TOK_TYPE:
-        switch (second_arg_token.type)
-        { case U3_TOK_TYPE:
-          case E8_TOK_TYPE:
-            panic;
-          case ANON_LABEL_TOK_TYPE:
-          { int j = n_anonymous_labels + second_arg_token.value;
-            if (0 > j || n_anonymous_labels <= j) panic;
-            int x = anonymous_labels[j] - program->length - 1;
-            append(OP_JR_CC_E8, first_arg_token.value, x);
-            break;
-          }
-          default:
-            panic;
-        } break;
-        default:
-          panic;
-      } break;
-      case RET_TOK:
-        panic;
-      case RETI_TOK:
-        panic;
-      case RST_TOK:
-        panic;
-
-      case POP_TOK:
-        pattern_6(OP_POP_AF, OP_POP_R16);
-        break;
-      case PUSH_TOK:
-        pattern_6(OP_PUSH_AF, OP_PUSH_R16);
-        break;
-
-      case CCF_TOK:
-        pattern_5(OP_CCF);
-        break;
-      case CPL_TOK:
-        pattern_5(OP_CPL);
-        break;
-      case DAA_TOK:
-        pattern_5(OP_DAA);
-        break;
-      case DI_TOK:
-        pattern_5(OP_DI);
-        break;
-      case EI_TOK:
-        pattern_5(OP_EI);
-        break;
-      case HALT_TOK:
-        pattern_5(OP_HALT);
-        break;
-      case NOP_TOK:
-        pattern_5(OP_NOP);
-        break;
-      case SCF_TOK:
-        pattern_5(OP_SCF);
-        break;
-      case STOP_TOK:
-        pattern_5(OP_STOP);
-        break;
-      default: panic;
+      l++;
+      s += 1 + n;
+      n = next_newline(s);
     }
-    line += i;
+
+    // patch up anonymous label references
+    for (int i = 0, j = 0; i < n_label_references; i++)
+    { int isn = label_references[i].isn;
+      uint16_t *p;
+      switch (label_references[i].arg)
+      { case 0: p = &program->instructions[isn].p1; break;
+        case 1: p = &program->instructions[isn].p2; break;
+        default: panic;
+      }
+
+      while (n_labels != j && labels[j] < isn)
+        j++;
+
+      int k = (int16_t)*p + j;
+      if (0 > k || n_labels <= k)
+        parse_error
+        ( "anonymous label does not exist"
+        , label_references[i].n, label_references[i].s
+        );
+
+      *p = labels[k] - isn - 1;
+    }
   }
 
   return program;
