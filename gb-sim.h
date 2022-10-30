@@ -1213,24 +1213,26 @@ struct
   int32_t value;
 } arg_tokens[] =
 { "", NONE_TOK_TYPE, 0
-, "hl", R16_TOK_TYPE, R16_HL
-, "de", R16_TOK_TYPE, R16_DE
-, "c", R8_TOK_TYPE, R8_C
 , "a", R8_TOK_TYPE, R8_A
-, "[de]", IR16_TOK_TYPE, R16_DE
-, "[hli]", IHLI_TOK_TYPE, 0
-, "nz", CC_TOK_TYPE, CC_NZ
-, ":-", ANON_LABEL_TOK_TYPE, -1
-, "l", R8_TOK_TYPE, R8_L
+, "b", R8_TOK_TYPE, R8_B
+, "c", R8_TOK_TYPE, R8_C
+, "d", R8_TOK_TYPE, R8_D
+, "e", R8_TOK_TYPE, R8_E
 , "h", R8_TOK_TYPE, R8_H
+, "l", R8_TOK_TYPE, R8_L
+, "bc", R16_TOK_TYPE, R16_BC
+, "de", R16_TOK_TYPE, R16_DE
+, "hl", R16_TOK_TYPE, R16_HL
+, "[bc]", IR16_TOK_TYPE, R16_DE
+, "[de]", IR16_TOK_TYPE, R16_DE
 , "[hl]", IHL_TOK_TYPE, 0
+, "[hli]", IHLI_TOK_TYPE, 0
 , "[hld]", IHLD_TOK_TYPE, 0
+, "nz", CC_TOK_TYPE, CC_NZ
 , "sp", SP_TOK_TYPE, 0
 , "af", AF_TOK_TYPE, 0
-, "b", R8_TOK_TYPE, R8_B
+, ":-", ANON_LABEL_TOK_TYPE, -1
 , ":--", ANON_LABEL_TOK_TYPE, -2
-, "d", R8_TOK_TYPE, R8_D
-, "bc", R16_TOK_TYPE, R16_BC
 };
 size_t n_arg_tokens = listsize(arg_tokens);
 
