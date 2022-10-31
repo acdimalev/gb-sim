@@ -1819,6 +1819,9 @@ struct program *parse_program
           int n3 = -1 != n2 ? n2 : n1;
           while (' ' == s1[n3-1]) n3--;
 
+          arg_tokens_n[n_arg_tokens] = n3;
+          arg_tokens_s[n_arg_tokens] = s1;
+
           arg_tokens[n_arg_tokens++] = parse_arg_token(n_symbols, symbols, n3, s1);
         }
 
