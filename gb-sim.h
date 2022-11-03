@@ -1213,11 +1213,13 @@ enum arg_token_type
 struct arg_token
 { enum arg_token_type type;
   int32_t value;
+  int n; char *s;
 };
 
 struct
 { char string[8];
-  struct arg_token token;
+  enum arg_token_type type;
+  int32_t value;
 } arg_tokens[] =
 { "", NONE_TOK_TYPE, 0
 , "a", R8_TOK_TYPE, R8_A
@@ -1341,13 +1343,13 @@ struct arg_token parse_arg_token
   for (i = 0; n > i; i++)
     if ('0' > s[i] || '9' < s[i]) break;
   if (n == i)
-    return (struct arg_token){ N_TOK_TYPE, parse_base10(n, s) };
+    return (struct arg_token){ N_TOK_TYPE, parse_base10(n, s), n, s };
 
   if ('%' == *s)
   { for (i = 1; n > i; i++)
       if ('0' > s[i] || '1' < s[i]) break;
     if (n == i)
-      return (struct arg_token){ N_TOK_TYPE, parse_base2(n-1, 1+s) };
+      return (struct arg_token){ N_TOK_TYPE, parse_base2(n-1, 1+s), n, s };
   }
 
   if ('$' == *s)
@@ -1358,16 +1360,20 @@ struct arg_token parse_arg_token
       || 'f' < s[i]
       ) break;
     if (n == i)
-      return (struct arg_token){ N_TOK_TYPE, parse_base16(n-1, 1+s) };
+      return (struct arg_token){ N_TOK_TYPE, parse_base16(n-1, 1+s), n, s };
   }
 
   for (int i = 0; i < n_arg_tokens; i++)
   if (streq(arg_tokens[i].string, n, s))
-    return arg_tokens[i].token;
+    return (struct arg_token)
+      { arg_tokens[i].type
+      , arg_tokens[i].value
+      , n, s
+      };
 
   for (int i = 0; i < n_symbols; i++)
   if (streq(symbols[i].name, n, s))
-    return (struct arg_token){ N_TOK_TYPE, symbols[i].value };
+    return (struct arg_token){ N_TOK_TYPE, symbols[i].value, n, s };
 
   parse_error("invalid argument", n, s);
 }
@@ -1575,42 +1581,35 @@ static const struct instruction_signature {
   };
 
 
-static inline
-void n8_arg(int x, struct arg_token arg_tokens[2], int n[2], char *s[2])
-{ if (arg_tokens[x].value < -128 || arg_tokens[x].value > 255)
-    parse_error("argument must be 8-bit", n[x], s[x]);
+static inline void n8_arg(struct arg_token arg_token)
+{ if (arg_token.value < -128 || arg_token.value > 255)
+    parse_error("argument must be 8-bit", arg_token.n, arg_token.s);
 }
-static inline
-void a_arg(int x, struct arg_token arg_tokens[2], int n[2], char *s[2])
-{ if (arg_tokens[x].value != R8_A)
-    parse_error("argument must be register A", n[x], s[x]);
+static inline void a_arg(struct arg_token arg_token)
+{ if (arg_token.value != R8_A)
+    parse_error("argument must be register A", arg_token.n, arg_token.s);
 }
-static inline
-void hl_arg(int x, struct arg_token arg_tokens[2], int n[2], char *s[2])
-{ if (arg_tokens[x].value != R16_HL)
-    parse_error("argument must be register HL", n[x], s[x]);
+static inline void hl_arg(struct arg_token arg_token)
+{ if (arg_token.value != R16_HL)
+    parse_error("argument must be register HL", arg_token.n, arg_token.s);
 }
-static inline
-void u3_arg(int x, struct arg_token arg_tokens[2], int n[2], char *s[2])
-{ if (arg_tokens[x].value < 0 || arg_tokens[x].value > 7)
-    parse_error("argument must be 3-bit unsigned", n[x], s[x]);
+static inline void u3_arg(struct arg_token arg_token)
+{ if (arg_token.value < 0 || arg_token.value > 7)
+    parse_error("argument must be 3-bit unsigned", arg_token.n, arg_token.s);
 }
-static inline
-void n16_arg(int x, struct arg_token arg_tokens[2], int n[2], char *s[2])
-{ if (arg_tokens[x].value < -32768 || arg_tokens[x].value > 65535)
-    parse_error("argument must be 16-bit", n[x], s[x]);
+static inline void n16_arg(struct arg_token arg_token)
+{ if (arg_token.value < -32768 || arg_token.value > 65535)
+    parse_error("argument must be 16-bit", arg_token.n, arg_token.s);
 }
-static inline
-void e8_arg(int x, struct arg_token arg_tokens[2], int n[2], char *s[2])
-{ if (arg_tokens[x].value < -128 || arg_tokens[x].value > 127)
-    parse_error("argument must be 8-bit offset", n[x], s[x]);
+static inline void e8_arg(struct arg_token arg_token)
+{ if (arg_token.value < -128 || arg_token.value > 127)
+    parse_error("argument must be 8-bit offset", arg_token.n, arg_token.s);
 }
 
 
 static inline struct instruction parse_instruction
 ( enum isn_token isn_token, struct arg_token arg_tokens[2]
 , int instruction_n, char *instruction_s
-, int arg_tokens_n[2], char *arg_tokens_s[2]
 )
 { const struct instruction_signature *signature =
     &instruction_signatures[isn_token][arg_tokens[0].type][arg_tokens[1].type];
@@ -1631,99 +1630,99 @@ static inline struct instruction parse_instruction
     case ARGS_AF:
       return (struct instruction){ op, 0, 0 };
     case ARGS_N8:
-    { n8_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { n8_arg(arg_tokens[0]);
       return (struct instruction){ op, arg_tokens[0].value, 0 };
     }
     case ARGS_A_R8:
     case ARGS_A_IR16:
     case ARGS_A_IN16:
-    { a_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { a_arg(arg_tokens[0]);
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     }
     case ARGS_A_IHL:
     case ARGS_A_IC:
     case ARGS_A_IHLI:
     case ARGS_A_IHLD:
-    { a_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { a_arg(arg_tokens[0]);
       return (struct instruction){ op, 0, 0 };
     }
     case ARGS_A_N8:
-    { a_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
-      n8_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { a_arg(arg_tokens[0]);
+      n8_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     }
     case ARGS_HL_R16:
-    { hl_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { hl_arg(arg_tokens[0]);
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     }
     case ARGS_U3_R8:
-    { u3_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { u3_arg(arg_tokens[0]);
       return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
     }
     case ARGS_U3_IHL:
-    { u3_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { u3_arg(arg_tokens[0]);
       return (struct instruction){ op, arg_tokens[0].value, 0 };
     }
     case ARGS_R8_R8:
       return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
     case ARGS_R8_N8:
-    { n8_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { n8_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
     }
     case ARGS_R16_N16:
     case ARGS_CC_N16:
-    { n16_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { n16_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
     }
     case ARGS_IHL_R8:
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     case ARGS_IHL_N8:
-    { n8_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { n8_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     }
     case ARGS_IR16_A:
     case ARGS_IN16_A:
-    { a_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { a_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[0].value, 0 };
     }
     case ARGS_IC_A:
     case ARGS_IHLI_A:
     case ARGS_IHLD_A:
-    { a_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { a_arg(arg_tokens[1]);
       return (struct instruction){ op, 0, 0 };
     }
     case ARGS_N16:
-    { n16_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { n16_arg(arg_tokens[0]);
       return (struct instruction){ op, arg_tokens[0].value, 0 };
     }
     case ARGS_HL:
     case ARGS_HL_SP:
-    { hl_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { hl_arg(arg_tokens[0]);
       return (struct instruction){ op, 0, 0 };
     }
     case ARGS_E8:
-    { e8_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { e8_arg(arg_tokens[0]);
       return (struct instruction){ op, arg_tokens[0].value, 0 };
     }
     case ARGS_CC_E8:
-    { e8_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { e8_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[0].value, arg_tokens[1].value };
     }
     case ARGS_SP_E8:
-    { e8_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { e8_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     }
     case ARGS_SP_N16:
-    { n16_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { n16_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     }
     case ARGS_HL_SPE8:
-    { hl_arg(0, arg_tokens, arg_tokens_n, arg_tokens_s);
-      e8_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { hl_arg(arg_tokens[0]);
+      e8_arg(arg_tokens[1]);
       return (struct instruction){ op, arg_tokens[1].value, 0 };
     }
     case ARGS_SP_HL:
-    { hl_arg(1, arg_tokens, arg_tokens_n, arg_tokens_s);
+    { hl_arg(arg_tokens[1]);
       return (struct instruction){ op, 0, 0 };
     }
     case ARGS_INVALID:
@@ -1792,8 +1791,6 @@ struct program *parse_program
 
         int instruction_n = n1;
         char *instruction_s = s1;
-        int arg_tokens_n[2];
-        char *arg_tokens_s[2];
 
         int n2 = char_in_range(' ', n1, s1);
         isn_token = parse_isn_token(-1 != n2 ? n2 : n1, s1);
@@ -1813,9 +1810,6 @@ struct program *parse_program
           int n3 = -1 != n2 ? n2 : n1;
           while (' ' == s1[n3-1]) n3--;
 
-          arg_tokens_n[n_arg_tokens] = n3;
-          arg_tokens_s[n_arg_tokens] = s1;
-
           arg_tokens[n_arg_tokens++] = parse_arg_token(n_symbols, symbols, n3, s1);
         }
 
@@ -1823,7 +1817,6 @@ struct program *parse_program
         program->instructions[program->length++] = parse_instruction
         ( isn_token, arg_tokens
         , instruction_n, instruction_s
-        , arg_tokens_n, arg_tokens_s
         );
 
         switch (program->instructions[program->length-1].op)
