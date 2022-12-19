@@ -14,12 +14,18 @@ feedback on the behavior of the assembly code as I write it.
 Prior knowledge of testing invariants and symmetries is probably essential for
 making practical use of this simulator.
 
+Also, please use something like `entr`.  Latency to feedback is important!
+https://eradman.com/entrproject/
+
 
 Examples
 --------
 
 It's a Sliding Puzzle (Ludum Dare 51 Compo)
 https://ldjam.com/events/ludum-dare/51/its-a-sliding-puzzle
+
+It's a Maze (7DFPS 2022)
+https://itch.io/jam/7dfps-2022/rate/1840440
 
 
 Usage
@@ -58,19 +64,17 @@ a solution to problems that I do not have.
 Jumps (Branches)
 ----------------
 
-At the moment, only conditional relative jumps backwards to anonymous labels
-is supported.  This is obviously insufficient for practical use.  Most likely
-I will limit myself to implementing anonymous labels only.  However, relative
-jumps forward and unconditional jumps backward will need to be implemented.
+Only relative jumps to anonymous labels are supported.  The simulator doesn't
+have any concept of instruction set size though, so this will probably be
+extended to absolute jumps.  For practical reasons, a failure condition on
+maximum cycles almost certainly needs to be implemented.
 
 
-Comments & Expressions
-----------------------
+Expressions
+-----------
 
-At the moment, comments are not supported and only extremely basic support for
-integer constants is present.  After putting this simulator to practical use in
-developing a game in 48 hours for Ludum Dare, I can say with confidence that
-robust support for these features is absolutely necessary and I plan to add them.
+Only extremely basic support for integer constants is present.  This will need
+to be expanded into a more robust support for expressions.
 
 
 Performance
