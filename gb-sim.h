@@ -1034,15 +1034,15 @@ void run_program(struct program *program)
       case OP_JP_HL: panic;
       case OP_JP_N16: panic;
       case OP_JP_CC_N16: panic;
-      case OP_JR_E8: panic;
+      case OP_JR_E8: pc += x->p1; cycles += 3; break;
       case OP_JR_CC_E8:
       { bool flag = false;
         switch (x->p1)
         { case CC_NZ: flag = !(FLAG_Z & reg.f); break;
+          default: panic;
         }
         if (flag) { pc += x->p2; cycles += 3; } else { cycles += 2; }
-        break;
-      }
+      } break;
       case OP_RET_CC: panic;
       case OP_RET: panic;
       case OP_RETI: panic;
@@ -1232,7 +1232,7 @@ struct
 , "bc", R16_TOK_TYPE, R16_BC
 , "de", R16_TOK_TYPE, R16_DE
 , "hl", R16_TOK_TYPE, R16_HL
-, "[bc]", IR16_TOK_TYPE, R16_BE
+, "[bc]", IR16_TOK_TYPE, R16_BC
 , "[de]", IR16_TOK_TYPE, R16_DE
 , "[hl]", IHL_TOK_TYPE, 0
 , "[hli]", IHLI_TOK_TYPE, 0
@@ -1242,6 +1242,8 @@ struct
 , "af", AF_TOK_TYPE, 0
 , ":-", ANON_LABEL_TOK_TYPE, -1
 , ":--", ANON_LABEL_TOK_TYPE, -2
+, ":+", ANON_LABEL_TOK_TYPE, 0
+, ":++", ANON_LABEL_TOK_TYPE, 1
 };
 size_t n_arg_tokens = listsize(arg_tokens);
 
@@ -1549,6 +1551,7 @@ static const struct instruction_signature {
   , [JP_TOK  ][N_TOK_TYPE   ][NONE_TOK_TYPE] = { OP_JP_N16,      ARGS_N16     }
   , [JP_TOK  ][CC_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_JP_CC_N16,   ARGS_CC_N16  }
   , [JR_TOK  ][N_TOK_TYPE   ][NONE_TOK_TYPE] = { OP_JR_E8,       ARGS_E8      }
+  , [JR_TOK][ANON_LABEL_TOK_TYPE][NONE_TOK_TYPE] = { OP_JR_E8, ARGS_E8 }
   , [JR_TOK  ][CC_TOK_TYPE  ][N_TOK_TYPE   ] = { OP_JR_CC_E8,    ARGS_CC_E8   }
   , [JR_TOK][CC_TOK_TYPE][ANON_LABEL_TOK_TYPE] = { OP_JR_CC_E8, ARGS_CC_E8 }
   , [RET_TOK ][CC_TOK_TYPE  ][NONE_TOK_TYPE] = { OP_RET_CC,      ARGS_CC      }
@@ -1820,7 +1823,16 @@ struct program *parse_program
         );
 
         switch (program->instructions[program->length-1].op)
-        { case OP_JR_CC_E8:
+        { case OP_JR_E8:
+            if (max_instructions == n_label_references) panic;
+            label_references[n_label_references++] = (struct label_reference)
+              { .isn = program->length-1
+              , .arg = 0
+              , .n = instruction_n
+              , .s = instruction_s
+              };
+            break;
+          case OP_JR_CC_E8:
             if (max_instructions == n_label_references) panic;
             label_references[n_label_references++] = (struct label_reference)
               { .isn = program->length-1
