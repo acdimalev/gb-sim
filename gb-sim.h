@@ -1232,7 +1232,7 @@ struct
 , "bc", R16_TOK_TYPE, R16_BC
 , "de", R16_TOK_TYPE, R16_DE
 , "hl", R16_TOK_TYPE, R16_HL
-, "[bc]", IR16_TOK_TYPE, R16_DE
+, "[bc]", IR16_TOK_TYPE, R16_BE
 , "[de]", IR16_TOK_TYPE, R16_DE
 , "[hl]", IHL_TOK_TYPE, 0
 , "[hli]", IHLI_TOK_TYPE, 0
